@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smack Test Game</title>
+
+<style>
+  html, body {
+    margin: 0;
+    overflow: hidden;
+    background: #000;
+    font-family: Arial, Helvetica, sans-serif;
+  }
+  canvas { display: block; }
+
+  #ui {
+    position: absolute;
+    top: 15px;
+    left: 15px;
+    color: white;
+    background: rgba(0,0,0,0.5);
+    padding: 12px;
+    border-radius: 8px;
+    user-select: none;
+    pointer-events: none;
+    display: none;
+    z-index: 10;
+  }
+
+  #crosshair {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 8px;
+    height: 8px;
+    margin-left: -4px;
+    margin-top: -4px;
+    border: 2px solid white;
+    border-radius: 50%;
+    opacity: 0.7;
+    pointer-events: none;
+    display: none;
+    z-index: 10;
+  }
+
+  #start {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: row;
+    background: radial-gradient(circle at center, #1e3c72 0%, #2a5298 100%);
+    color: white;
+    z-index: 100;
+  }
+
+  #preview-container {
+    flex: 1;
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+
+  #preview-canvas {
+    width: 100%;
+    height: 100%;
+  }
+
+  #menu-panel {
+    width: 380px;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(10px);
+    box-shadow: -5px 0 25px rgba(0,0,0,0.5);
+    padding: 40px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    box-sizing: border-box;
+  }
+
+  h2 {
+    margin-top: 0;
+    font-size: 28px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    border-bottom: 2px solid #00ff44;
+    padding-bottom: 10px;
+  }
+
+  .control-group {
+    margin-bottom: 25px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .control-group label {
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .control-group input[type="color"] {
+    border: none;
+    width: 60px;
+    height: 40px;
+    border-radius: 6px;
+    cursor: pointer;
+    background: none;
+  }
+
+  #join-btn {
+    background: #00ff44;
+    color: #000;
+    border: none;
+    padding: 15px;
+    font-size: 20px;
+    font-weight: bold;
+    border-radius: 8px;
+    cursor: pointer;
+    text-transform: uppercase;
+    transition: transform 0.1s ease, background 0.2s ease;
+    margin-top: 20px;
+    letter-spacing: 1px;
+  }
+
+  #join-btn:hover {
+    background: #00cc37;
+    transform: scale(1.02);
+  }
+</style>
+</head>
+<body>
+
+<div id="ui">
+  WASD - Move<br>
+  SPACE - Jump<br>
+  I/O - Toggle Camera View Mode<br>
+  Left Click - Throw Item / Smack Player<br>
+  Right Click - Hold / Drop Item
+</div>
+
+<div id="crosshair"></div>
+
+<div id="start">
+  <div id="preview-container">
+    <canvas id="preview-canvas"></canvas>
+  </div>
+  <div id="menu-panel">
+    <h2>Smack Test</h2>
+    
+    <div class="control-group">
+      <label for="body-color">Torso Color</label>
+      <input type="color" id="body-color" value="#00ff44">
+    </div>
+
+    <div class="control-group">
+      <label for="head-color">Head Color</label>
+      <input type="color" id="head-color" value="#00ff44">
+    </div>
+
+    <div class="control-group">
+      <label for="limb-color">Arms Color</label>
+      <input type="color" id="limb-color" value="#00ff44">
+    </div>
+
+    <button id="join-btn">Save & Join Game</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+
+<script>
+  let previewScene, previewCamera, previewRenderer, menuMesh, menuHead, menuLArm, menuRArm;
+
+  function initMenuCustomizer() {
+    const canvas = document.getElementById('preview-canvas');
+    const container = document.getElementById('preview-container');
+
+    previewScene = new THREE.Scene();
+    previewCamera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
+    previewCamera.position.set(0, 1.5, 5);
+
+    previewRenderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true });
+    previewRenderer.setSize(container.clientWidth, container.clientHeight);
+
+    previewScene.add(new THREE.AmbientLight(0xffffff, 0.8));
+    const directional = new THREE.DirectionalLight(0xffffff, 0.6);
+    directional.position.set(5, 10, 5);
+    previewScene.add(directional);
+
+    const mat = new THREE.MeshLambertMaterial({ color: 0x00ff44 });
+
+    menuMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 2, 1), mat.clone());
+    menuMesh.position.y = 0.5;
+    previewScene.add(menuMesh);
+
+    menuHead = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7), mat.clone());
+    menuHead.position.set(0, 1.45, 0);
+    previewScene.add(menuHead);
+
+    menuRArm = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.9, 0.25), mat.clone());
+    menuRArm.position.set(0.8, 0.6, 0);
+    menuRArm.rotation.z = 0.3;
+    previewScene.add(menuRArm);
+
+    menuLArm = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.9, 0.25), mat.clone());
+    menuLArm.position.set(-0.8, 0.6, 0);
+    menuLArm.rotation.z = -0.3;
+    previewScene.add(menuLArm);
+
+    document.getElementById('body-color').addEventListener('input', (e) => {
+      menuMesh.material.color.set(e.target.value);
+      updateColors();
+    });
+    document.getElementById('head-color').addEventListener('input', (e) => {
+      menuHead.material.color.set(e.target.value);
+      updateColors();
+    });
+    document.getElementById('limb-color').addEventListener('input', (e) => {
+      menuRArm.material.color.set(e.target.value);
+      menuLArm.material.color.set(e.target.value);
+      updateColors();
+    });
+
+    animateMenu();
+  }
+
+  function animateMenu() {
+    if (document.getElementById('start').style.display === 'none') return;
+    requestAnimationFrame(animateMenu);
+    const time = Date.now() * 0.001;
+    menuMesh.rotation.y = time * 0.5;
+    menuHead.rotation.y = time * 0.5;
+    previewRenderer.render(previewScene, previewCamera);
+  }
+
+  function updateColors() {
+    if (window.player) {
+      window.player.updateMeshColors(
+        document.getElementById('body-color').value,
+        document.getElementById('head-color').value,
+        document.getElementById('limb-color').value
+      );
+    }
+  }
+
+  document.getElementById('join-btn').addEventListener('click', () => {
+    document.getElementById('start').style.display = 'none';
+    document.getElementById('ui').style.display = 'block';
+    document.getElementById('crosshair').style.display = 'block';
+    
+    // Initialize active game network engine links
+    window.startMultiplayerEngine();
+  });
+
+  window.addEventListener('DOMContentLoaded', initMenuCustomizer);
+</script>
+
+<script src="game.js"></script>
+</body>
+</html>
